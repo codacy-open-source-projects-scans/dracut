@@ -7,8 +7,6 @@ test_check() {
     command -v systemctl &> /dev/null
 }
 
-export KVERSION=${KVERSION-$(uname -r)}
-
 # Uncomment this to debug failures
 #DEBUGFAIL="rd.shell rd.break"
 #DEBUGOUT="quiet systemd.log_level=debug systemd.log_target=console loglevel=77  rd.info rd.debug"
@@ -20,19 +18,19 @@ client_run() {
 
     echo "CLIENT TEST START: $test_name"
 
-    dd if=/dev/zero of="$TESTDIR"/marker.img bs=1MiB count=1
     declare -a disk_args=()
     declare -i disk_index=0
     qemu_add_drive_args disk_index disk_args "$TESTDIR"/marker.img marker
     qemu_add_drive_args disk_index disk_args "$TESTDIR"/root.btrfs root
     qemu_add_drive_args disk_index disk_args "$TESTDIR"/usr.btrfs usr
 
+    test_marker_reset
     "$testdir"/run-qemu \
         "${disk_args[@]}" \
         -append "systemd.unit=testsuite.target systemd.mask=systemd-firstboot panic=1 oops=panic softlockup_panic=1 systemd.crash_reboot root=LABEL=dracut $client_opts rd.retry=3 console=ttyS0,115200n81 selinux=0 $DEBUGOUT rd.shell=0 $DEBUGFAIL" \
         -initrd "$TESTDIR"/initramfs.testing || return 1
 
-    if ! grep -U --binary-files=binary -F -m 1 -q dracut-root-block-success "$TESTDIR"/marker.img; then
+    if ! test_marker_check; then
         echo "CLIENT TEST END: $test_name [FAILED]"
         return 1
     fi
@@ -119,9 +117,8 @@ EOF
     # We do it this way so that we do not risk trashing the host mdraid
     # devices, volume groups, encrypted partitions, etc.
     "$basedir"/dracut.sh -l -i "$TESTDIR"/overlay / \
-        -m "test-makeroot bash btrfs rootfs-block kernel-modules qemu" \
-        -d "piix ide-gd_mod ata_piix btrfs sd_mod" \
-        -I "mkfs.btrfs btrfs sync" \
+        -m "test-makeroot bash btrfs" \
+        -I "mkfs.btrfs" \
         -i ./create-root.sh /lib/dracut/hooks/initqueue/01-create-root.sh \
         --nomdadmconf \
         --nohardlink \
@@ -130,15 +127,12 @@ EOF
     rm -rf -- "$TESTDIR"/overlay/*
 
     # Create the blank file to use as a root filesystem
-    dd if=/dev/zero of="$TESTDIR"/root.btrfs bs=1MiB count=160
-    dd if=/dev/zero of="$TESTDIR"/usr.btrfs bs=1MiB count=160
-    dd if=/dev/zero of="$TESTDIR"/marker.img bs=1MiB count=1
     declare -a disk_args=()
     # shellcheck disable=SC2034
     declare -i disk_index=0
-    qemu_add_drive_args disk_index disk_args "$TESTDIR"/marker.img marker
-    qemu_add_drive_args disk_index disk_args "$TESTDIR"/root.btrfs root
-    qemu_add_drive_args disk_index disk_args "$TESTDIR"/usr.btrfs usr
+    qemu_add_drive_args disk_index disk_args "$TESTDIR"/marker.img marker 1
+    qemu_add_drive_args disk_index disk_args "$TESTDIR"/root.btrfs root 160
+    qemu_add_drive_args disk_index disk_args "$TESTDIR"/usr.btrfs usr 160
 
     # Invoke KVM and/or QEMU to actually create the target filesystem.
     "$testdir"/run-qemu \
@@ -146,7 +140,7 @@ EOF
         -append "root=/dev/fakeroot rw rootfstype=btrfs quiet console=ttyS0,115200n81 selinux=0" \
         -initrd "$TESTDIR"/initramfs.makeroot || return 1
 
-    if ! grep -U --binary-files=binary -F -m 1 -q dracut-root-block-created "$TESTDIR"/marker.img; then
+    if ! test_marker_check dracut-root-block-created; then
         echo "Could not create root filesystem"
         return 1
     fi
@@ -163,10 +157,6 @@ EOF
         -f "$TESTDIR"/initramfs.testing "$KVERSION" || return 1
 
     rm -rf -- "$TESTDIR"/overlay
-}
-
-test_cleanup() {
-    return 0
 }
 
 # shellcheck disable=SC1090

@@ -2,11 +2,6 @@ FROM registry.fedoraproject.org/fedora:latest
 
 MAINTAINER https://github.com/dracutdevs/dracut
 
-ENV container docker
-LABEL RUN="docker run -it --name NAME --privileged --ipc=host --net=host --pid=host -e NAME=NAME -e IMAGE=IMAGE IMAGE"
-
-RUN echo 'export DRACUT_NO_XATTR=1 KVERSION=$(cd /lib/modules; ls -1 | tail -1)' > /etc/profile.d/dracut-test.sh
-
 # Install needed packages for the dracut CI container
 RUN dnf -y install --setopt=install_weak_deps=False \
     asciidoc \
@@ -64,6 +59,7 @@ RUN dnf -y install --setopt=install_weak_deps=False \
     squashfs-tools \
     strace \
     sudo \
+    systemd-boot-unsigned \
     systemd-networkd \
     systemd-resolved \
     tar \
@@ -73,6 +69,3 @@ RUN dnf -y install --setopt=install_weak_deps=False \
     which \
     xz \
     && dnf -y remove dracut --noautoremove && dnf -y update && dnf clean all
-
-# Set default command
-CMD ["/usr/bin/bash"]
