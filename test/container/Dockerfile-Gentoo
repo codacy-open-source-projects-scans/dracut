@@ -1,0 +1,57 @@
+ARG TAG=musl
+FROM docker.io/gentoo/portage:latest as portage
+
+# uefi stub in a separate builder
+FROM docker.io/gentoo/stage3 as efistub
+COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+
+# systemd-boot
+RUN echo 'sys-apps/systemd-utils boot' > /etc/portage/package.use/systemd-utils && \
+    emerge -qv sys-apps/systemd-utils
+
+# kernel and its dependencies in a separate builder
+FROM docker.io/gentoo/stage3:$TAG as kernel
+COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+# disable initramfs generation, only need the kernel image itself
+RUN echo 'sys-kernel/gentoo-kernel-bin -initramfs' > /etc/portage/package.use/kernel
+RUN emerge -qv sys-kernel/gentoo-kernel-bin
+
+FROM docker.io/gentoo/stage3:$TAG
+COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+COPY --from=kernel /boot /boot
+COPY --from=kernel /lib/modules /lib/modules
+COPY --from=efistub /usr/lib/systemd/boot/efi /usr/lib/systemd/boot/efi
+ARG TAG
+
+MAINTAINER https://github.com/dracutdevs/dracut
+
+# required by sys-fs/dmraid
+RUN echo 'sys-fs/lvm2 lvm thin' > /etc/portage/package.use/lvm2
+
+# workaround for https://bugs.gentoo.org/734022 whereby Gentoo does not support NFS4 with musl
+RUN if [[ "$TAG" == 'musl' ]]; then echo 'net-fs/nfs-utils -nfsv4' > /etc/portage/package.use/nfs-utils ; fi
+
+# workaround for packages do not compile on musl
+# https://bugs.gentoo.org/713490 for tgt
+# https://bugs.gentoo.org/908587 for open-iscsi
+RUN if [[ "$TAG" != 'musl' ]]; then emerge -qv sys-block/tgt sys-block/open-iscsi ; fi
+
+# Install needed packages for the dracut CI container
+RUN emerge -qv \
+    app-arch/cpio \
+    app-emulation/qemu \
+    app-shells/dash \
+    net-fs/nfs-utils \
+    net-misc/dhcp \
+    sys-apps/busybox \
+    sys-block/nbd \
+    sys-block/parted \
+    sys-fs/btrfs-progs \
+    sys-fs/cryptsetup \
+    sys-fs/dmraid \
+    sys-fs/lvm2 \
+    sys-fs/mdadm \
+    sys-fs/multipath-tools \
+    sys-fs/ntfs3g \
+    sys-fs/squashfs-tools \
+    && rm -rf /var/cache/* /usr/share/doc/* /usr/share/man/*
